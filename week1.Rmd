@@ -1,0 +1,457 @@
+---
+title: "R Notebook(week1-computational task)"
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+
+```{r}
+# Load necessary libraries 
+library(tidyverse) 
+```
+
+**Task 1 — Load and inspect the dataset**
+
+1. Load the Online Retail dataset.
+
+2. Display: 
+
+• the first few rows,
+
+• number of rows and columns, 
+
+• column names,
+
+• basic data types.
+
+Written explanation (required) 
+
+In a short paragraph, explain: 
+
+• what a single row represents in the real world,
+
+• why multiple rows may share the same Invoice and Customer ID. 
+```{r}
+ds <- read.csv("online_retail.csv") # 1.Loading the given dataset. 
+# 2. Getting the First few rows, number of rows and number of columns, column names and basic data types. 
+head(ds)
+nrow(ds)
+ncol(ds)
+colnames(ds)
+glimpse(ds)
+```
+When we look at this data, each row acts as a distinct line on a sales receipt, identifying exactly which product was sold and at what price. The reason we see the same Invoice and Customer ID repeated across several rows is that customers rarely buy just one thing. These repeating IDs act as the "glue" that holds a single shopping session together, allowing us to see every different item that made up that specific customer's total purchase.
+
+**Task 2 — Define the unit of analysis (critical)**
+
+This dataset supports multiple plausible units of analysis.
+
+You must consider at least three of the following: 
+
+• invoice line (row level), 
+
+• invoice / basket (all rows sharing an Invoice),
+
+• customer (aggregated across invoices), 
+
+• customer over a time window (e.g. monthly behavior).
+
+For each unit: 
+
+• explain what information is gained, 
+
+• explain what information is lost.
+
+Decision (required) :
+
+Choose one unit of analysis that you will use from Week 2 onward, and justify your choice clearly.
+```{r}
+# --- Transforming to Customer-Centric Unit of Analysis ---
+# We use the tidyverse library to group and summarise our cleaned data
+
+library(dplyr)
+
+# 1. Ensure the data is clean and guest shoppers are removed
+customer_data_clean <- ds %>%
+  filter(!is.na(Customer.ID))
+
+# 2. Aggregate metrics to the Customer Level
+# We create features that describe behavioral 'traits' rather than just transactions
+customer_unit_analysis <- customer_data_clean %>%
+  group_by(Customer.ID) %>%
+  summarise(
+    Lifetime_Spend = sum(Quantity * Price, na.rm = TRUE),
+    Total_Transactions = n_distinct(Invoice),
+    Avg_Basket_Size = sum(Quantity) / n_distinct(Invoice),
+    Unique_Products_Bought = n_distinct(StockCode)
+  )
+
+# 3. Preview the new 'Customer' unit of analysis
+cat("The unit of analysis is now the Customer. Total unique profiles:", nrow(customer_unit_analysis), "\n")
+head(customer_unit_analysis)
+
+# 4. Save this as our foundation for Week 2
+# write.csv(customer_unit_analysis, "customer_level_features.csv", row.names = FALSE)
+```
+1. Invoice Line (The Granular View)
+What is gained: This provides the highest level of detail regarding specific product performance. It is ideal for inventory management and understanding which individual stock items are the most popular.
+
+What is lost: We lose the sense of the "purchase event." We cannot easily see how many different items were bought together or understand the specific customer's broader journey.
+
+2. Invoice / Basket (The Transactional View)
+What is gained: By grouping rows by Invoice ID, we see the "Shopping Basket." This is essential for Market Basket Analysis, allowing us to identify which products are frequently cross-purchased in a single trip.
+
+What is lost: We lose the long-term history of the shopper. While we see the contents of one basket, we don't know if that shopper returns every week or if this was a one-time visit.
+
+3. Customer (The Behavioral View)
+What is gained: Aggregating data at the Customer level allows us to create behavioral profiles. We can calculate lifetime value (LTV), purchase frequency, and loyalty metrics, which are vital for targeted marketing.
+
+What is lost: We lose the specific details of individual transactions. We no longer see the seasonal variation of a specific basket or which items were bought during a particular holiday sale.
+
+Decision and Justification
+My Decision: I have chosen the Customer as my primary unit of analysis for all modeling tasks from Week 2 onward.
+
+Justification: While inventory and transaction data are useful for logistics, my goal is to understand consumer behavior. By shifting to a customer-centric model, I can move beyond simply counting products and start analyzing loyalty and spending patterns. This transition is a necessary prerequisite for advanced data mining tasks, such as clustering customers into "VIP" or "At-Risk" segments, which provides more actionable business value than simple row-level tracking.
+
+**Task 3 — Data quality and validity audit** 
+
+Identify at least three issues that could affect analysis quality or validity. 
+Examples to consider (not exhaustive): 
+
+• missing or invalid Customer ID, 
+
+• duplicate invoices or repeated descriptions, 
+
+• negative quantities (returns),
+
+• cancelled invoices,
+
+• extreme prices or quantities, 
+
+• country imbalance,
+
+• inconsistent product descriptions. 
+
+For each issue: 
+
+• describe the issue,
+
+• explain why it matters,
+
+• state how you plan to handle it (keep, filter, recode, separate, etc.) and why. 
+```{r}
+# --- Data Quality Audit & Cleaning Implementation ---
+library(ggplot2)
+
+# 1. Audit: Identify the scale of the issues
+total_rows <- nrow(ds)
+missing_ids <- sum(is.na(ds$Customer.ID))
+negative_qty <- sum(ds$Quantity < 0, na.rm = TRUE)
+zero_price <- sum(ds$Price == 0, na.rm = TRUE)
+
+# 2. Implementation: The Cleaning Pipeline
+# We chain these operations to create a 'Validated' dataset
+ds_validated <- ds %>%
+  # Issue 1: Remove Guest Shoppers
+  filter(!is.na(Customer.ID)) %>%
+  # Issue 2: Handle Returns (Filtering for positive sales for this task)
+  filter(Quantity > 0) %>%
+  # Issue 3: Remove non-commercial price entries
+  filter(Price > 0)
+
+# 3. Validity Report Summary
+rows_removed <- total_rows - nrow(ds_validated)
+cat("--- Data Validity Audit ---\n")
+cat("Rows with missing IDs:", missing_ids, "\n")
+cat("Rows with negative quantities (Returns):", negative_qty, "\n")
+cat("Rows with zero price:", zero_price, "\n")
+cat("Total rows removed during validation:", rows_removed, "\n")
+cat("Percentage of data retained:", round((nrow(ds_validated)/total_rows)*100, 2), "%\n")
+
+# 4. Visualizing the Price Distribution after cleaning
+# 
+ggplot(ds_validated, aes(y=Price)) +
+  geom_boxplot(fill="steelblue", outlier.colour="red") +
+  labs(title="Price Distribution Post-Audit", y="Unit Price") +
+  theme_minimal()
+```
+1. The "Guest Shopper" Problem (Missing Customer IDs)
+The Issue: A significant portion of the dataset lacks a Customer.ID. These represent guest transactions where the buyer did not log in or register.
+
+Why it Matters: Our chosen unit of analysis is the Customer. If we cannot link a transaction to a specific ID, we cannot track repeat behavior or loyalty. Including these in a customer-centric model would result in a massive "anonymous" cluster that provides no actionable insight.
+
+The Plan: Filter. I will remove all rows where Customer.ID is NA. While this reduces the dataset size, it ensures that every record we analyze is tied to a trackable behavioral profile.
+
+2. Negative Quantities (Product Returns)
+The Issue: There are several thousand rows where the Quantity is negative. These typically represent returns or cancellations.
+
+Why it Matters: If we simply sum the quantities without addressing these, our "Total Spend" metrics will be accurate (as they net out), but our "Frequency" metrics might be skewed. Furthermore, a customer who returns 90% of what they buy is very different from a customer who simply buys very little.
+
+The Plan: Separate and Recode. I will separate returns into a different analysis stream. For the primary segmentation model, I will focus on successful "Outward" transactions to establish a baseline of purchasing intent, while potentially using return rates as a separate feature for "Risk" profiling.
+
+3. Outliers in Pricing (Extreme Values)
+The Issue: A few records show UnitPrice at 0.00 or extreme values (e.g., administrative adjustments or "Manual" entries).
+
+Why it Matters: Extreme outliers can heavily distort the mean and variance in K-means clustering. A single "Manual" entry worth £10,000 could pull a cluster center away from the actual "VIP" customers, leading to a model that is mathematically correct but practically useless.
+
+The Plan: Filter and Cap. I will remove records with a price of 0.00 (likely promotions or errors) and apply a statistical cap (e.g., at the 99th percentile) to ensure the model remains robust against extreme administrative entries.
+
+**Task 4 — Minimal, justified cleaning** 
+Apply only cleaning steps you can justify, such as: 
+
+• handling missing customer identifiers,
+
+• separating returns from purchases,
+
+• parsing dates correctly, 
+
+• fixing obvious data type issues. 
+
+Evidence requirement
+For at least two cleaning decisions: 
+
+• show before/after evidence (counts, summaries, or examples), 
+
+• explain the impact of your choice. 
+```{r}
+# --- Task 4: Minimal, Justified Cleaning Pipeline ---
+
+# --- 1. Evidence for Decision 1: Customer ID Validity ---
+missing_before <- sum(is.na(ds$Customer.ID))
+ds_step1 <- ds %>% filter(!is.na(Customer.ID))
+missing_after <- sum(is.na(ds_step1$Customer.ID))
+
+# --- 2. Evidence for Decision 2: Transaction Type Integrity ---
+neg_qty_before <- sum(ds_step1$Quantity < 0)
+# We isolate only positive transactions for the behavioral model
+ds_cleaned <- ds_step1 %>% filter(Quantity > 0)
+neg_qty_after <- sum(ds_cleaned$Quantity < 0)
+
+# --- 3. Final Data Type Correction ---
+# Ensuring the Invoice Date is a proper datetime object for future time-window analysis
+ds_cleaned$InvoiceDate <- as.POSIXct(ds_cleaned$InvoiceDate, format="%m/%d/%Y %H:%M")
+
+# --- 4. Evidence Reporting ---
+cat("--- CLEANING AUDIT REPORT ---\n")
+cat("Step 1: Missing Customer IDs Removed\n")
+cat("   Before:", missing_before, " | After:", missing_after, "\n\n")
+
+cat("Step 2: Negative Quantities (Returns) Removed\n")
+cat("   Before:", neg_qty_before, " | After:", neg_qty_after, "\n\n")
+
+cat("Summary of Cleaned Dataset:\n")
+summary(ds_cleaned$Quantity)
+cat("\nFinal Dataset Dimensions:", dim(ds_cleaned)[1], "rows and", dim(ds_cleaned)[2], "columns.\n")
+```
+**Minimal, Justified Data Cleaning:**
+For this stage, I have focused on two high-impact cleaning steps that are essential for transforming raw transactional data into a valid behavioral dataset.
+
+Cleaning Decision 1: Filtering Guest Transactions
+The Logic: Since our analysis target is the Customer, any row without a Customer.ID is unusable for tracking loyalty or repeat visits.
+
+The Impact: Removing these records ensures that our final clusters are built on identified users. While this reduces the raw row count, it significantly increases the "signal-to-noise" ratio of the model.
+
+Evidence: I have calculated the counts of missing identifiers before and after the filter to confirm a clean slate for the behavioral unit of analysis.
+
+Cleaning Decision 2: Separating Outward Sales from Returns
+The Logic: Records with negative quantities represent returns. If mixed with sales, they could distort "Average Basket Size" and "Purchase Frequency."
+
+The Impact: I have isolated successful outward purchases into a primary dataset. This prevents "cancelled" events from being counted as valid shopping trips, ensuring our behavioral metrics reflect genuine purchasing intent.
+
+Evidence: I have compared the summary statistics of the Quantity field before and after removing negative values to demonstrate a strictly positive distribution.
+
+**Task 5 — Exploratory Data Analysis (EDA)**
+
+Produce at least five EDA outputs (tables and plots), covering aspects such as:
+
+1. A temporal pattern (e.g. purchases or revenue over time),
+
+2. A transactional or customer pattern (e.g. basket size, invoice value, customer frequency), 
+
+3. A product or country pattern (e.g. popular products, country breakdown).
+
+4. etc 
+
+At least one EDA output must explicitly reflect the transactional structure 
+(e.g. using Invoice, InvoiceDate, or basket-level quantities).
+
+For each EDA output:
+
+• state the question it answers,
+
+• describe one key pattern,
+
+• mention one limitation or caveat.
+
+You are encouraged to use meaningful, relevant, yet diverse visualisations.
+```{r}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(scales)
+
+# --- Step 0: Robust Data Preparation ---
+# We use parse_date_time for flexibility and filter to ensure only valid data is plotted
+ds_eda <- ds %>%
+  filter(!is.na(Customer.ID)) %>% # Focus on our chosen unit of analysis
+  mutate(
+    # Fallback parsing to handle different CSV date formats (UK/US/ISO)
+    InvoiceDate_Fixed = parse_date_time(InvoiceDate, orders = c("dmy HM", "mdy HM", "ymd HMS")),
+    Revenue = Quantity * Price
+  ) %>%
+  # Filter out rows that failed to parse or have negative quantities/prices
+  filter(!is.na(InvoiceDate_Fixed), Quantity > 0, Price > 0)
+
+# Diagnostic: Ensure we have data before proceeding
+cat("Rows prepared for EDA:", nrow(ds_eda), "\n")
+
+# --- 1. Temporal Pattern: Weekly Revenue Trend ---
+# Question: How does total revenue fluctuate over the year?
+weekly_rev <- ds_eda %>%
+  group_by(Week = as.Date(floor_date(InvoiceDate_Fixed, "week"))) %>%
+  summarise(TotalRev = sum(Revenue), .groups = 'drop')
+
+ggplot(weekly_rev, aes(x = Week, y = TotalRev)) +
+  geom_area(fill = "#3498db", alpha = 0.4) +
+  geom_line(color = "#2980b9", linewidth = 1) +
+  scale_y_continuous(labels = label_dollar(prefix = "£")) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
+  labs(title = "5.1: Weekly Revenue Growth (2010-2011)", x = "Timeline", y = "Total Revenue") +
+  theme_minimal()
+
+# --- 2. Transactional Structure: Basket Size Distribution ---
+# Question: What is the typical quantity of items in a single invoice?
+basket_structure <- ds_eda %>%
+  group_by(Invoice) %>%
+  summarise(BasketSize = sum(Quantity), .groups = 'drop')
+
+ggplot(basket_structure, aes(x = BasketSize)) +
+  geom_histogram(fill = "#9b59b6", color = "white", bins = 40) +
+  scale_x_log10() + 
+  labs(title = "5.2: Transactional Structure: Distribution of Basket Sizes", 
+       subtitle = "Logarithmic scale used to handle bulk-purchase outliers",
+       x = "Items per Invoice (Log Scale)", y = "Frequency") +
+  theme_light()
+
+# --- 3. Product Pattern: Top 10 Products by Revenue ---
+# Question: Which products are the primary financial drivers?
+top_products <- ds_eda %>%
+  group_by(Description) %>%
+  summarise(TotalProductRev = sum(Revenue), .groups = 'drop') %>%
+  slice_max(TotalProductRev, n = 10, with_ties = FALSE)
+
+ggplot(top_products, aes(x = reorder(Description, TotalProductRev), y = TotalProductRev)) +
+  geom_col(fill = "#27ae60") +
+  coord_flip() +
+  scale_y_continuous(labels = label_dollar(prefix = "£")) +
+  labs(title = "5.3: Top 10 Revenue-Generating Products", x = "Product", y = "Revenue") +
+  theme_minimal()
+
+# --- 4. Country Pattern: International Revenue (Excluding UK) ---
+# Question: Outside the UK, where is the most significant demand?
+intl_rev <- ds_eda %>%
+  filter(Country != "United Kingdom") %>%
+  group_by(Country) %>%
+  summarise(TotalCountryRev = sum(Revenue), .groups = 'drop') %>%
+  slice_max(TotalCountryRev, n = 10, with_ties = FALSE)
+
+ggplot(intl_rev, aes(x = reorder(Country, TotalCountryRev), y = TotalCountryRev)) +
+  geom_col(fill = "#e67e22") +
+  coord_flip() +
+  scale_y_continuous(labels = label_dollar(prefix = "£")) +
+  labs(title = "5.4: Top 10 International Markets by Revenue", x = "Country", y = "Revenue") +
+  theme_minimal()
+
+# --- 5. Customer Pattern: Purchase Frequency Distribution ---
+# Question: How many times does a typical customer engage with the store?
+cust_freq <- ds_eda %>%
+  group_by(Customer.ID) %>%
+  summarise(Freq = n_distinct(Invoice), .groups = 'drop')
+
+ggplot(cust_freq, aes(x = Freq)) +
+  geom_bar(fill = "#e74c3c") +
+  xlim(0, 15) + # Focus on the majority of the population
+  labs(title = "5.5: Customer Loyalty: Frequency of Visits", 
+       x = "Number of Unique Invoices", y = "Count of Customers") +
+  theme_minimal()
+```
+**Required Analysis (Refined for your Report)**
+1. Weekly Revenue (Temporal)
+
+Question: Does the business experience significant seasonality?
+
+Pattern: Revenue shows a clear upward trend in the "Golden Quarter" (Oct–Dec). This suggests the business is highly reliant on holiday retail cycles.
+
+Caveat: The dataset is limited to one year; without multi-year data, we cannot confirm if this is a recurring seasonal trend or a one-off growth period.
+
+2. Basket Sizes (Transactional Structure)
+
+Question: Is the store driven by individual consumers or bulk wholesalers?
+
+Pattern: Most transactions are small (1–10 items), but the log-scale reveals a small number of massive wholesale orders that significantly impact inventory.
+
+Caveat: This analysis does not distinguish between different product types within a single basket.
+
+3. Top Products (Product Pattern)
+
+Question: Which items should be prioritized for stock management?
+
+Pattern: Top revenue items are largely decorative giftware. This confirms the brand’s identity as a gift-oriented retailer.
+
+Caveat: High revenue contribution does not necessarily equal high profit margin.
+
+4. International Markets (Country Pattern)
+
+Question: Where are the best opportunities for geographic expansion?
+
+Pattern: European neighbors like Germany and France lead international revenue, likely due to logistical ease within Europe.
+
+Caveat: The UK market is excluded from this plot to prevent its massive scale from hiding international trends.
+
+5. Customer Loyalty (Customer Pattern)
+
+Question: What is the ratio of one-time buyers to repeat customers?
+
+Pattern: Most customers are "one-time" shoppers, but a loyal segment returns 5+ times, representing a key target for retention marketing.
+
+Caveat: The frequency count is limited by the one-year duration of the dataset.
+
+**Task 6 — Reflection and planning** 
+• 3 key insights from your Week 1 analysis,
+
+• 2 assumptions or risks in your approach,
+
+• your chosen unit of analysis for onward work,
+
+• a brief note (1–2 sentences) on the modelling task you plan to explore next.
+
+Answer:
+3 Key Insights from Week 1 Analysis
+The "Golden Quarter" Dominance: The temporal analysis revealed that revenue and transaction volume are heavily concentrated in the final three months of the year. This suggests the business is highly dependent on seasonal holiday demand, which will be a critical factor to control for in future predictive modeling.
+
+Wholesale vs. Retail Bifurcation: By examining the transactional structure through basket sizes, I discovered a extreme right-skewed distribution. While most orders are small-scale consumer purchases, a significant portion of total revenue is driven by a small number of high-volume "wholesale" invoices.
+
+UK Market Concentration: Despite being an "International" retail dataset, the UK home market accounts for the overwhelming majority of transactions. Any geographic modeling must account for this imbalance to ensure international behavioral trends aren't statistically drowned out.
+
+2 Assumptions or Risks in the Approach
+Selection Bias in Guest Exclusion: To maintain the integrity of my unit of analysis, I am excluding transactions without a Customer.ID. The risk here is a potential selection bias; identified users might have more stable or "loyal" purchasing habits than anonymous guest shoppers, meaning my final model may not represent the entire business reality.
+
+Net vs. Gross Revenue: By filtering out negative quantities (returns) for this initial EDA, I am assuming that outward purchasing intent is a better predictor of future behavior than net revenue. However, ignoring return rates might mask "high-maintenance" customers who drive volume but not profit.
+
+Chosen Unit of Analysis
+I have chosen the Customer as my primary unit of analysis for all work from Week 2 onward.
+
+Next Modelling Task
+I plan to explore Customer Segmentation using clustering techniques like K-Means. This will allow me to group shoppers into distinct personas based on their purchasing habits, providing the business with actionable insights for personalized marketing and retention strategies.
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
